@@ -1,0 +1,199 @@
+#!/usr/bin/env bash
+# builds hasheus for every platform on this machine, creates a github release
+# with them for the tag of the current version, then verifies each with hasheus.
+# pass --dry-run to only build them.
+set -euo pipefail
+
+TARGETS=(
+  aarch64-apple-darwin
+  x86_64-apple-darwin
+  aarch64-unknown-linux-musl
+  x86_64-unknown-linux-musl
+)
+DIST_DIR=target/dist
+DOWNLOADS_URL=https://github.com/tinfoilhash/hasheus-cli/releases/download
+
+main() {
+  local is_dry_run=false
+  case ${1:-} in
+    --dry-run) is_dry_run=true ;;
+    '') ;;
+    *) fail "usage: bin/release [--dry-run]" ;;
+  esac
+
+  cd "$(dirname "$0")/.."
+  use_rustup_toolchain
+  check_tools
+
+  local version
+  version=$(read_version)
+  if [[ $is_dry_run == false ]]; then
+    check_gh
+    check_publishing_env
+    check_release_commit "v$version"
+  fi
+
+  rustup target add "${TARGETS[@]}"
+  rm -rf "$DIST_DIR"
+  mkdir -p "$DIST_DIR"
+
+  # the file names have no version, so the latest release's download links
+  # never change.
+  local target name
+  for target in "${TARGETS[@]}"; do
+    name=$(asset_name "$target")
+    build "$target"
+    cp "target/$target/release/hasheus" "$DIST_DIR/$name"
+  done
+
+  (cd "$DIST_DIR" && shasum -a 256 hasheus-* > SHA256SUMS)
+
+  if [[ $is_dry_run == true ]]; then
+    echo "built v$version in $DIST_DIR"
+    return
+  fi
+
+  gh release create "v$version" --verify-tag --generate-notes "$DIST_DIR"/*
+  publish_verifications "v$version"
+}
+
+# another rust earlier in the PATH (like homebrew's) ignores rust-toolchain.toml
+# and the targets rustup adds.
+use_rustup_toolchain() {
+  local cargo_path
+  cargo_path=$(rustup which cargo)
+  PATH="$(dirname "$cargo_path"):$PATH"
+}
+
+check_tools() {
+  LLVM_BIN=${LLVM_BIN:-$(brew --prefix llvm 2> /dev/null || true)/bin}
+
+  if [[ ! -x $LLVM_BIN/clang || ! -x $LLVM_BIN/llvm-ar ]]; then
+    fail "llvm is required to build for linux: brew install llvm"
+  fi
+}
+
+check_gh() {
+  if ! command -v gh > /dev/null; then
+    fail "gh is required to create the release: brew install gh"
+  fi
+
+  if ! gh auth status > /dev/null 2>&1; then
+    fail "log in to github first: gh auth login"
+  fi
+}
+
+# the verifications go to the production relays, not ones set for development,
+# like by the web app's dev/cli.env, which also sets the dev user's key.
+check_publishing_env() {
+  if [[ -n ${HASHEUS_FILE_RELAY_URLS:-} || -n ${HASHEUS_USER_RELAY_URLS:-} ]]; then
+    fail "unset HASHEUS_FILE_RELAY_URLS and HASHEUS_USER_RELAY_URLS to publish to the production relays"
+  fi
+
+  case ${HASHEUS_SECRET_KEY:-} in
+    nsec1* | ncryptsec1*) ;;
+    *) fail "set HASHEUS_SECRET_KEY to the nsec or ncryptsec that verifies the release" ;;
+  esac
+}
+
+read_version() {
+  local package_id
+  package_id=$(cargo pkgid)
+  echo "${package_id##*[#@]}"
+}
+
+# the binaries have to come from exactly what's tagged, and the tag has to be
+# on github for the release to use it.
+check_release_commit() {
+  local tag=$1
+
+  if [[ -n $(git status --porcelain) ]]; then
+    fail "commit or stash your changes first"
+  fi
+
+  if [[ $(git rev-parse --quiet --verify "$tag^{commit}") != $(git rev-parse HEAD) ]]; then
+    fail "tag the current commit as $tag first"
+  fi
+
+  # an annotated tag's commit comes last, as its peeled ^{} ref.
+  local remote_commit
+  remote_commit=$(git ls-remote origin "refs/tags/$tag" "refs/tags/$tag^{}" | tail -1 | cut -f1)
+  if [[ $remote_commit != $(git rev-parse HEAD) ]]; then
+    fail "push the $tag tag of the current commit first"
+  fi
+}
+
+build() {
+  local target=$1
+
+  case $target in
+    *-apple-darwin)
+      cargo build --locked --release --target "$target"
+      ;;
+    *-unknown-linux-musl)
+      build_for_linux "$target"
+      ;;
+    *)
+      fail "no way to build for $target"
+      ;;
+  esac
+}
+
+# named after what `uname -s` and `uname -m` print where it runs, so one install
+# command fits every platform.
+asset_name() {
+  local target=$1
+
+  case $target in
+    aarch64-apple-darwin) echo hasheus-darwin-arm64 ;;
+    x86_64-apple-darwin) echo hasheus-darwin-x86_64 ;;
+    aarch64-unknown-linux-musl) echo hasheus-linux-aarch64 ;;
+    x86_64-unknown-linux-musl) echo hasheus-linux-x86_64 ;;
+    *) fail "no file name for $target" ;;
+  esac
+}
+
+# ring's c is compiled without any libc headers, so no linux sysroot is needed.
+# ring only does that itself for arm, so x86-64 also has to be freestanding to
+# keep clang's intrinsics from including stdlib.h.
+build_for_linux() {
+  local target=$1
+  local env_target=${target//-/_}
+  local cargo_target
+  cargo_target=$(echo "$env_target" | tr '[:lower:]' '[:upper:]')
+  local cflags="--target=$target"
+
+  if [[ $target == x86_64-* ]]; then
+    cflags+=" -ffreestanding -nostdlibinc -DRING_CORE_NOSTDLIBINC=1"
+  fi
+
+  env \
+    "CC_$env_target=$LLVM_BIN/clang" \
+    "AR_$env_target=$LLVM_BIN/llvm-ar" \
+    "CFLAGS_$env_target=$cflags" \
+    "CARGO_TARGET_${cargo_target}_LINKER=rust-lld" \
+    "CARGO_TARGET_${cargo_target}_RUSTFLAGS=-C link-self-contained=yes" \
+    cargo build --locked --release --target "$target"
+}
+
+# verifies the binaries with hasheus as built for this mac, once they're uploaded
+# so their download urls work.
+publish_verifications() {
+  local tag=$1
+  local host
+  host=$(rustc -vV | sed -n 's/^host: //p')
+
+  local binary name
+  for binary in "$DIST_DIR"/hasheus-*; do
+    name=${binary##*/}
+    echo "verifying $name"
+    "target/$host/release/hasheus" publish --yes --url "$DOWNLOADS_URL/$tag/$name" "$binary" > /dev/null
+  done
+}
+
+fail() {
+  echo "$1" >&2
+  exit 1
+}
+
+main "$@"

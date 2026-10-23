@@ -1,0 +1,34 @@
+[package]
+name = "hasheus"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+description = "verify the integrity of a file with the largest decentralized web of trust"
+license = "MIT"
+repository = "https://github.com/tinfoilhash/hasheus-cli"
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+jiff = "0.2.39"
+# nip49 decrypts an ncryptsec. nip59 is only there because nostr 0.45.6 gates a
+# helper nip49 needs behind nip46 or nip59, so nip49 alone doesn't compile.
+nostr = { version = "0.45.6", features = ["nip49", "nip59"] }
+nostr-sdk = "0.45.6"
+rpassword = "7.5.4"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+terminal_size = "0.4.4"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+yansi = { version = "1.0.1", features = ["detect-env", "detect-tty"] }
+
+[dev-dependencies]
+nostr-sdk = { version = "0.45.6", features = ["local-relay"] }
+
+# smaller downloads at the cost of slower release builds. opt-level "s" didn't
+# measurably slow down hashing, even on a cpu without sha instructions.
+[profile.release]
+codegen-units = 1
+lto = "fat"
+opt-level = "s"
+strip = true

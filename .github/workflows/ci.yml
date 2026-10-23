@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # installs the version and components pinned in rust-toolchain.toml.
+      - name: install rust
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
+        with:
+          tool: cargo-llvm-cov@0.9.1
+
+      - name: lint
+        run: |
+          cargo fmt --check
+          cargo clippy --locked --all-targets -- -D warnings
+
+      # `shell: bash` adds pipefail, so a failing test is caught through tee.
+      # the summary is written either way, then the step fails if tests did.
+      - name: test
+        shell: bash
+        run: |
+          status=0
+          cargo llvm-cov --locked --summary-only | tee "$RUNNER_TEMP/coverage.txt" || status=$?
+          {
+            echo '### test coverage'
+            echo '```'
+            sed -n '/^Filename/,$p' "$RUNNER_TEMP/coverage.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - name: build
+        run: cargo build --locked
