@@ -165,8 +165,8 @@ cargo install cargo-llvm-cov --locked
 cargo llvm-cov --summary-only
 ```
 
-ci runs the linters, tests, and build on every push to `main` and every pull
-request, and adds the coverage table to each run's summary.
+ci runs the linters, tests, and build on every push to `development` and `main`
+and every pull request, and adds the coverage table to each run's summary.
 
 ### code style & linting
 
@@ -198,8 +198,8 @@ it also verifies each binary with hasheus itself, so set `HASHEUS_SECRET_KEY` to
 the key that signs the verifications (see [publish](#publish)). an ncryptsec
 asks for its password for each one, 4 times in all.
 
-bump the version in [`Cargo.toml`](Cargo.toml), then build to update
-`Cargo.lock` to match:
+when the `development` branch is ready for release, bump the version in
+[`Cargo.toml`](Cargo.toml), then build to update `Cargo.lock` to match:
 
 ```bash
 cargo build
@@ -210,7 +210,7 @@ commit it as the bare tag, then tag it and push both:
 ```bash
 git commit Cargo.toml Cargo.lock --message v0.2.0
 git tag v0.2.0
-git push origin main v0.2.0
+git push origin development v0.2.0
 ```
 
 then build every platform, create the github release with them and their
@@ -226,4 +226,13 @@ with `hasheus publish`. to only build every platform, in `target/dist`:
 
 ```bash
 bin/release --dry-run
+```
+
+once the release is complete, merge the `development` branch into the `main`
+branch, which should always reflect the latest release:
+
+```bash
+git switch main
+git merge development
+git push origin main
 ```
