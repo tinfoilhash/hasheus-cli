@@ -4,6 +4,12 @@ use tokio::task::JoinSet;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
+// like the web page, an event that doesn't match what was asked for is dropped,
+// so a relay can't pass off another file's verification as this file's.
+pub fn build_client() -> Client {
+    Client::builder().verify_subscriptions(true).build()
+}
+
 // a relay that fails to connect isn't retried, so callers only use the ones
 // that connect.
 pub async fn connect(client: &Client, url: &RelayUrl) -> Option<Relay> {

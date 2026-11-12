@@ -11,7 +11,7 @@ const PROFILE_TIMEOUT: Duration = Duration::from_secs(3);
 // the newest profile of the user that the relays return in time. each relay is
 // asked on its own, so one that's slow to connect doesn't hide another's answer.
 pub async fn fetch(public_key: PublicKey, relay_urls: &[RelayUrl]) -> Option<Event> {
-    let client = Client::default();
+    let client = relay_connector::build_client();
     let filter = Filter::new()
         .kind(Kind::Metadata)
         .author(public_key)
@@ -56,7 +56,7 @@ pub async fn fetch(public_key: PublicKey, relay_urls: &[RelayUrl]) -> Option<Eve
 mod tests {
     use super::*;
     use crate::test_event_builders::build_profile;
-    use crate::test_relays::{DEAD_RELAY_URL, relay_url, run_relay};
+    use crate::test_relays::{DEAD_RELAY_URL, relay_url, run_mismatching_relay, run_relay};
 
     #[tokio::test]
     async fn fetches_the_newest_profile() {
@@ -67,6 +67,16 @@ mod tests {
         let profile = fetch(keys.public_key(), &[relay_url(&url)]).await;
 
         assert_eq!(profile, Some(newer));
+    }
+
+    #[tokio::test]
+    async fn ignores_events_a_relay_sends_that_werent_asked_for() {
+        let (_relay, url) = run_mismatching_relay().await;
+
+        assert_eq!(
+            fetch(Keys::generate().public_key(), &[relay_url(&url)]).await,
+            None
+        );
     }
 
     #[tokio::test]

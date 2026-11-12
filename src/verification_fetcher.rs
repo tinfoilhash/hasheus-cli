@@ -188,7 +188,7 @@ async fn coordinate(
     sender: mpsc::Sender<Result<Update, HasheusError>>,
 ) {
     // the client shuts its relays down when dropped, so it's held until the end.
-    let client = Client::default();
+    let client = relay_connector::build_client();
     let mut progress = Progress::new(&stages_by_url, user_requirement);
     let mut has_loaded = false;
     let mut has_found_user_profile = false;
@@ -395,7 +395,9 @@ mod tests {
     use crate::test_event_builders::{
         HASH, build_event, build_file_event, build_follow_list, build_profile,
     };
-    use crate::test_relays::{DEAD_RELAY_URL, build_relay_config, relay_url, run_relay};
+    use crate::test_relays::{
+        DEAD_RELAY_URL, build_relay_config, relay_url, run_mismatching_relay, run_relay,
+    };
 
     mod group_stages_by_url {
         use super::*;
@@ -626,6 +628,17 @@ mod tests {
             let other_hash = Tag::parse(["x", &"0".repeat(64)]).unwrap();
             let other_file = build_event(&alice, Kind::FileMetadata, 1, "", vec![other_hash]);
             let (_relay, url) = run_relay(&[other_file]).await;
+
+            let received = fetch_all(None, build_relay_config(&[&url], &[&url]))
+                .await
+                .unwrap();
+
+            assert_eq!(received, [Received::Loaded]);
+        }
+
+        #[tokio::test]
+        async fn ignores_events_a_relay_sends_that_werent_asked_for() {
+            let (_relay, url) = run_mismatching_relay().await;
 
             let received = fetch_all(None, build_relay_config(&[&url], &[&url]))
                 .await
