@@ -12,7 +12,7 @@ pub struct Source<'a> {
 
 pub struct SortedVerifications<'a> {
     pub trusted_events: Vec<&'a Event>,
-    pub untrusted_events: Vec<&'a Event>,
+    pub unknown_events: Vec<&'a Event>,
     pub source: Source<'a>,
     pub verdict: Verdict,
 }
@@ -21,7 +21,7 @@ pub struct SortedVerifications<'a> {
 pub enum Verdict {
     VerifiedByYou,
     Trusted,
-    Untrusted,
+    Unknown,
     Unverified,
 }
 
@@ -32,7 +32,7 @@ pub fn sort<'a>(
 ) -> SortedVerifications<'a> {
     let verifier_events = first_event_per_pubkey(events);
 
-    let (trusted_events, untrusted_events): (Vec<_>, Vec<_>) =
+    let (trusted_events, unknown_events): (Vec<_>, Vec<_>) =
         verifier_events.iter().partition(|event| {
             current_user.is_some_and(|current_user| current_user.has_trusted(&event.pubkey))
         });
@@ -42,7 +42,7 @@ pub fn sort<'a>(
 
     SortedVerifications {
         trusted_events,
-        untrusted_events,
+        unknown_events,
         source,
         verdict,
     }
@@ -68,7 +68,7 @@ fn pick_verdict(
         Source {
             is_trusted: true, ..
         } => Verdict::Trusted,
-        _ => Verdict::Untrusted,
+        _ => Verdict::Unknown,
     }
 }
 
@@ -164,7 +164,7 @@ mod tests {
         let sorted = sort(&[], None);
 
         assert!(sorted.trusted_events.is_empty());
-        assert!(sorted.untrusted_events.is_empty());
+        assert!(sorted.unknown_events.is_empty());
         assert_eq!(
             sorted.source,
             Source {
@@ -185,11 +185,11 @@ mod tests {
 
         let sorted = sort(&events, None);
 
-        assert_eq!(sorted.untrusted_events, [&events[0]]);
+        assert_eq!(sorted.unknown_events, [&events[0]]);
     }
 
     #[test]
-    fn treats_everyone_as_untrusted_without_a_current_user() {
+    fn treats_everyone_as_unknown_without_a_current_user() {
         let users = Users::new();
         let events = [
             build_file_event(&users.trusted_a, 1, None),
@@ -199,7 +199,7 @@ mod tests {
         let sorted = sort(&events, None);
 
         assert!(sorted.trusted_events.is_empty());
-        assert_eq!(sorted.untrusted_events, [&events[0], &events[1]]);
+        assert_eq!(sorted.unknown_events, [&events[0], &events[1]]);
     }
 
     #[test]
@@ -215,11 +215,11 @@ mod tests {
         let sorted = sort(&events, Some(&current_user));
 
         assert_eq!(sorted.trusted_events, [&events[0], &events[1]]);
-        assert_eq!(sorted.untrusted_events, [&events[2]]);
+        assert_eq!(sorted.unknown_events, [&events[2]]);
     }
 
     #[test]
-    fn falls_back_to_the_earliest_event_untrusted_without_trusted_verifiers() {
+    fn falls_back_to_the_earliest_event_unknown_without_trusted_verifiers() {
         let users = Users::new();
         let events = [
             build_file_event(&users.stranger, 1, Some("https://evil.example/file")),
@@ -239,7 +239,7 @@ mod tests {
     }
 
     #[test]
-    fn ignores_a_backdated_untrusted_event_when_a_trusted_verifier_exists() {
+    fn ignores_a_backdated_unknown_event_when_a_trusted_verifier_exists() {
         let users = Users::new();
         let events = [
             build_file_event(&users.stranger, 1, Some("https://evil.example/file")),
@@ -364,14 +364,14 @@ mod tests {
     }
 
     #[test]
-    fn calls_a_source_without_trusted_verifiers_untrusted() {
+    fn calls_a_source_without_trusted_verifiers_unknown() {
         let users = Users::new();
         let events = [build_file_event(&users.stranger, 1, None)];
         let current_user = users.current_user(&[&users.trusted_a]);
 
         let sorted = sort(&events, Some(&current_user));
 
-        assert_eq!(sorted.verdict, Verdict::Untrusted);
+        assert_eq!(sorted.verdict, Verdict::Unknown);
     }
 
     #[test]

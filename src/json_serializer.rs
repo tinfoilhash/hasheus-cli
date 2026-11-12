@@ -17,7 +17,7 @@ struct VerificationJSON<'a> {
     status: &'static str,
     source: Option<SourceJSON>,
     trusted_verifiers: Vec<VerifierJSON>,
-    untrusted_verifiers: Vec<VerifierJSON>,
+    unknown_verifiers: Vec<VerifierJSON>,
     user: Option<UserJSON>,
 }
 
@@ -79,7 +79,7 @@ pub fn serialize_verifications(hash: &str, verifications: &Verifications) -> Str
             verifier: build_verifier(event, verifications),
         }),
         trusted_verifiers: build_verifiers(&sorted.trusted_events),
-        untrusted_verifiers: build_verifiers(&sorted.untrusted_events),
+        unknown_verifiers: build_verifiers(&sorted.unknown_events),
         user: current_user.map(|current_user| UserJSON {
             pubkey: current_user.public_key.to_hex(),
             npub: encode_npub(&current_user.public_key),
@@ -103,7 +103,7 @@ fn serialize_verdict(verdict: Verdict) -> &'static str {
     match verdict {
         Verdict::VerifiedByYou => "verified_by_you",
         Verdict::Trusted => "trusted",
-        Verdict::Untrusted => "untrusted",
+        Verdict::Unknown => "unknown",
         Verdict::Unverified => "unverified",
     }
 }
@@ -188,7 +188,7 @@ mod tests {
                     "status": "unverified",
                     "source": null,
                     "trusted_verifiers": [],
-                    "untrusted_verifiers": [],
+                    "unknown_verifiers": [],
                     "user": null,
                 }
             })
@@ -196,7 +196,7 @@ mod tests {
     }
 
     #[test]
-    fn serializes_an_untrusted_source_with_its_raw_description() {
+    fn serializes_an_unknown_source_with_its_raw_description() {
         let stranger = Keys::generate();
         let x = Tag::parse(["x", HASH]).unwrap();
         let url = Tag::parse(["url", "javascript:alert(1)"]).unwrap();
@@ -211,7 +211,7 @@ mod tests {
         let json = serialize(&build_verifications(None, vec![Update::FileEvent(event)]));
 
         let verification = &json["verification"];
-        assert_eq!(verification["status"], "untrusted");
+        assert_eq!(verification["status"], "unknown");
         assert_eq!(
             verification["source"]["description"],
             "official\n\u{1b}[32mdownload"
@@ -223,10 +223,7 @@ mod tests {
             "2009-01-03T00:00:00Z"
         );
         assert_eq!(
-            verification["untrusted_verifiers"]
-                .as_array()
-                .unwrap()
-                .len(),
+            verification["unknown_verifiers"].as_array().unwrap().len(),
             1
         );
     }
@@ -300,7 +297,7 @@ mod tests {
             ))],
         );
 
-        let verifier = &serialize(&verifications)["verification"]["untrusted_verifiers"][0];
+        let verifier = &serialize(&verifications)["verification"]["unknown_verifiers"][0];
 
         assert_eq!(verifier["name"], Value::Null);
         assert_eq!(verifier["created_at"], Value::Null);
