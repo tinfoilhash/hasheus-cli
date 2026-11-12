@@ -10,6 +10,14 @@ pub fn sanitize(text: &str) -> String {
         .collect()
 }
 
+// like the web page, a file name has only its bidi controls removed, since it
+// becomes the published description rather than terminal output.
+pub fn strip_bidi_controls(text: &str) -> String {
+    text.chars()
+        .filter(|character| !is_bidi_control(*character))
+        .collect()
+}
+
 fn is_bidi_control(character: char) -> bool {
     matches!(
         character,
@@ -34,5 +42,13 @@ mod tests {
     #[test]
     fn removes_bidi_overrides() {
         assert_eq!(sanitize("file\u{202E}osi.exe"), "fileosi.exe");
+    }
+
+    #[test]
+    fn strip_bidi_controls_keeps_everything_else() {
+        assert_eq!(
+            strip_bidi_controls("file\u{202E}osi.exe\u{2066}\n"),
+            "fileosi.exe\n"
+        );
     }
 }

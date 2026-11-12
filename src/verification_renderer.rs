@@ -9,11 +9,11 @@ use crate::verifications::Verifications;
 use jiff::fmt::strtime;
 use jiff::tz::TimeZone;
 use nostr_sdk::prelude::*;
-use yansi::{Color, Paint};
+use yansi::Paint;
 
 const EMPTY_VALUE: &str = "—";
 // like the web page's connect button.
-const USER_HINT: &str = "connect: set HASHEUS_PUBLIC_KEY or pass --user <npub> to see if anyone in your web of trust has verified this file";
+const USER_HINT: &str = "connect: set HASHEUS_PUBLIC_KEY or pass --user <npub> to see if anyone you follow has verified this file";
 // like the web page's "add your verification" link.
 const PUBLISH_HINT: &str = "add your verification: hasheus publish --url <url> <file>";
 const DATE_FORMAT: &str = "%b %-d, %Y, %-I:%M %P %Z";
@@ -41,8 +41,8 @@ pub fn render(file_hash: &FileHash, verifications: &Verifications, spinner_frame
             &empty_value,
         ),
         render_verifiers(
-            "untrusted verifiers",
-            &sorted.untrusted_events,
+            "unknown verifiers",
+            &sorted.unknown_events,
             verifications,
             &empty_value,
         ),
@@ -68,40 +68,50 @@ fn render_empty_value(is_pending: bool, spinner_frame: usize) -> String {
 }
 
 // the verdict can change until the file events and your profile and follow
-// list are in, so only a verification of your own shows before then.
+// list are in, so before then it only says it's looking, unless you've
+// verified the file yourself.
 fn render_status(
     sorted: &SortedVerifications,
     current_user: Option<&CurrentUser>,
     is_pending: bool,
 ) -> Vec<String> {
-    let (status, color) = match sorted.verdict {
-        Verdict::VerifiedByYou => ("you have verified this file!".to_string(), Color::Green),
-        _ if is_pending => return Vec::new(),
-        Verdict::Unverified => (
-            "this file has not been verified!".to_string(),
-            Color::Magenta,
-        ),
-        Verdict::Untrusted => {
-            let reason = if current_user.is_some() {
-                "no one in your web of trust has verified this file"
+    // like the web page, a status that's neither good nor bad news is uncolored.
+    let status = match sorted.verdict {
+        Verdict::VerifiedByYou => " you've verified this file ".bold().on_green().to_string(),
+        _ if is_pending => "looking up verifications…".bold().to_string(),
+        Verdict::Trusted => {
+            let count = sorted.trusted_events.len();
+            let people = if count == 1 {
+                "1 person".to_string()
             } else {
-                "connect to see if anyone in your web of trust has verified this file"
+                format!("{count} people")
             };
 
-            (
-                format!("{reason}. its source and url are untrusted."),
-                Color::Magenta,
-            )
+            format!(" {people} you follow verified this file ")
+                .bold()
+                .on_green()
+                .to_string()
         }
-        Verdict::Trusted => return Vec::new(),
+        Verdict::Unknown => {
+            let reason = if current_user.is_some() {
+                "no one you follow has verified this file"
+            } else {
+                "connect to see if anyone you follow has verified this file"
+            };
+
+            on_yellow(&format!(
+                " {reason}; its description, url, and source come from an unknown verifier "
+            ))
+        }
+        Verdict::Unverified => "no one has verified this file yet".bold().to_string(),
     };
 
-    vec![format!(" {status} ").bold().bg(color).to_string()]
+    vec![status]
 }
 
-// labeled whenever it shows, even while loading, so an untrusted source is
+// labeled whenever it shows, even while loading, so an unknown source is
 // never shown unlabeled.
-fn is_untrusted(source: &Source) -> bool {
+fn is_unknown(source: &Source) -> bool {
     source.event.is_some() && !source.is_trusted
 }
 
@@ -118,12 +128,12 @@ fn render_description(source: &Source, empty_value: &str) -> Vec<String> {
     vec!["description".to_string(), description]
 }
 
-// the url keeps an untrusted tag, since that's what people follow, and counts
+// the url keeps an unknown tag, since that's what people follow, and counts
 // the other trusted verifiers who agree on it.
 fn render_url(source: &Source, empty_value: &str) -> Vec<String> {
     let url = source.event.and_then(file_event::url);
     let tags = [
-        is_untrusted(source).then(render_untrusted_tag),
+        is_unknown(source).then(render_unknown_tag),
         render_agreement_tag(source.agreement_count),
     ];
 
@@ -137,10 +147,10 @@ fn render_url(source: &Source, empty_value: &str) -> Vec<String> {
 }
 
 // trust belongs to whoever published the verification, so the source carries
-// the trusted or untrusted tag.
+// the trusted or unknown tag.
 fn render_source(source: &Source, verifications: &Verifications, empty_value: &str) -> Vec<String> {
     let tags = [
-        is_untrusted(source).then(render_untrusted_tag),
+        is_unknown(source).then(render_unknown_tag),
         source.is_trusted.then(render_trusted_tag),
     ];
     let verifier = source.event.map_or_else(
@@ -198,19 +208,26 @@ fn render_key<const N: usize>(key: &str, tags: [Option<String>; N]) -> String {
     format!("{key} {}", tags.join(" "))
 }
 
-fn render_untrusted_tag() -> String {
-    " untrusted ".on_magenta().to_string()
+// like the web page, a glyph as well as a color, so a tag doesn't depend on
+// color alone. unknown is a question, not a warning.
+fn render_unknown_tag() -> String {
+    on_yellow(" ? unknown ")
 }
 
 fn render_trusted_tag() -> String {
-    " trusted ".on_green().to_string()
+    " ✓ trusted ".on_green().to_string()
 }
 
 // the source is one of the agreeing verifiers, so only the others are counted.
 fn render_agreement_tag(agreement_count: usize) -> Option<String> {
     let other_count = agreement_count.checked_sub(1).filter(|count| *count > 0)?;
 
-    Some(format!(" +{other_count} trusted ").on_green().to_string())
+    Some(format!(" ✓ +{other_count} trusted ").on_green().to_string())
+}
+
+// the terminal's own text color can be too light to read on yellow.
+fn on_yellow(text: &str) -> String {
+    text.black().on_yellow().to_string()
 }
 
 fn render_verifier_list(
@@ -296,20 +313,21 @@ mod tests {
     fn render_shows_pending_values_while_pending() {
         let rendered = render(&build_file_hash(), &build_verifications(true), 2);
 
+        assert!(rendered.starts_with("looking up verifications…\n\nfile hash"));
         assert!(rendered.contains("source\n⠹"));
-        assert!(!rendered.contains("this file has not been verified!"));
+        assert!(!rendered.contains("no one has verified this file yet"));
     }
 
     #[test]
-    fn render_waits_for_every_relay_before_calling_a_source_untrusted() {
+    fn render_waits_for_every_relay_before_calling_a_source_unknown() {
         let mut verifications = build_verifications(true);
         add_file_event(&mut verifications);
 
         let rendered = render(&build_file_hash(), &verifications, 0);
 
-        assert!(rendered.contains("url  untrusted "));
-        assert!(rendered.contains("source  untrusted "));
-        assert!(!rendered.contains("its source and url are untrusted"));
+        assert!(rendered.contains("url  ? unknown "));
+        assert!(rendered.contains("source  ? unknown "));
+        assert!(!rendered.contains("come from an unknown verifier"));
     }
 
     #[test]
@@ -338,7 +356,7 @@ mod tests {
         let rendered = render(&build_file_hash(), &verifications, 0);
 
         assert!(rendered.starts_with(
-            " connect to see if anyone in your web of trust has verified this file. its source and url are untrusted. "
+            " connect to see if anyone you follow has verified this file; its description, url, and source come from an unknown verifier "
         ));
     }
 
@@ -346,7 +364,7 @@ mod tests {
     fn render_shows_empty_values_once_complete() {
         let rendered = render(&build_file_hash(), &build_verifications(false), 2);
 
-        assert!(rendered.starts_with(" this file has not been verified! \n\nfile hash"));
+        assert!(rendered.starts_with("no one has verified this file yet\n\nfile hash"));
         assert!(rendered.contains("source\n—"));
     }
 
@@ -382,21 +400,21 @@ mod tests {
     }
 
     #[test]
-    fn render_tags_a_trusted_source_and_shows_no_verdict() {
+    fn render_tags_a_trusted_source_and_counts_the_people_you_follow() {
         let rendered = render(&build_file_hash(), &build_trusted_verifications(), 0);
 
-        assert!(rendered.starts_with("file hash"));
+        assert!(rendered.starts_with(" 2 people you follow verified this file \n\nfile hash"));
         assert!(rendered.contains("description\ndescription"));
-        assert!(rendered.contains("source  trusted \nalice "));
-        assert!(!rendered.contains(&render_untrusted_tag()));
-        assert!(!rendered.contains("are untrusted"));
+        assert!(rendered.contains("source  ✓ trusted \nalice "));
+        assert!(!rendered.contains(&render_unknown_tag()));
+        assert!(!rendered.contains("come from an unknown verifier"));
     }
 
     #[test]
     fn render_counts_the_other_trusted_verifiers_on_the_url() {
         let rendered = render(&build_file_hash(), &build_trusted_verifications(), 0);
 
-        assert!(rendered.contains("url  +1 trusted \nhttps://example.com/file.iso"));
+        assert!(rendered.contains("url  ✓ +1 trusted \nhttps://example.com/file.iso"));
         assert!(!rendered.contains("linked by"));
     }
 
@@ -422,7 +440,18 @@ mod tests {
         let rendered = render(&build_file_hash(), &verifications, 0);
 
         assert!(rendered.contains("url\nhttps://example.com/file.iso"));
-        assert!(rendered.contains("source  trusted "));
+        assert!(rendered.contains("source  ✓ trusted "));
+    }
+
+    #[test]
+    fn render_counts_a_lone_trusted_verifier_as_one_person() {
+        let rendered = render(
+            &build_file_hash(),
+            &build_lone_trusted_verifications(None),
+            0,
+        );
+
+        assert!(rendered.starts_with(" 1 person you follow verified this file "));
     }
 
     #[test]
@@ -434,7 +463,7 @@ mod tests {
         );
 
         assert!(rendered.contains("url\n—"));
-        assert!(rendered.contains("source  trusted "));
+        assert!(rendered.contains("source  ✓ trusted "));
     }
 
     #[test]
@@ -443,7 +472,7 @@ mod tests {
 
         assert_eq!(render_agreement_tag(0), None);
         assert_eq!(render_agreement_tag(1), None);
-        assert_eq!(render_agreement_tag(3).as_deref(), Some(" +2 trusted "));
+        assert_eq!(render_agreement_tag(3).as_deref(), Some(" ✓ +2 trusted "));
     }
 
     #[test]
@@ -452,7 +481,7 @@ mod tests {
 
         assert!(rendered.contains("trusted verifiers\nalice "));
         assert!(rendered.ends_with(&format!(
-            "untrusted verifiers\n—\n\n{PUBLISH_HINT}\nconnected: viewer"
+            "unknown verifiers\n—\n\n{PUBLISH_HINT}\nconnected: viewer"
         )));
     }
 
@@ -465,7 +494,7 @@ mod tests {
 
         let rendered = render(&build_file_hash(), &verifications, 0);
 
-        assert!(rendered.starts_with(" you have verified this file! "));
+        assert!(rendered.starts_with(" you've verified this file "));
         assert!(!rendered.contains(PUBLISH_HINT));
     }
 
@@ -478,7 +507,7 @@ mod tests {
         let rendered = render(&build_file_hash(), &verifications, 0);
 
         assert!(rendered.starts_with(
-            " no one in your web of trust has verified this file. its source and url are untrusted. "
+            " no one you follow has verified this file; its description, url, and source come from an unknown verifier "
         ));
     }
 
@@ -500,7 +529,7 @@ mod tests {
         let rendered = render(&file_hash, &build_verifications(false), 0);
 
         assert!(!rendered.contains(PUBLISH_HINT));
-        assert!(rendered.ends_with(&format!("untrusted verifiers\n—\n\n{USER_HINT}")));
+        assert!(rendered.ends_with(&format!("unknown verifiers\n—\n\n{USER_HINT}")));
     }
 
     #[test]

@@ -1,8 +1,8 @@
 # hasheus / cli
 
-verify the integrity of a file with the largest decentralized web of trust, from
-the command line. the cli version of [hasheus](https://github.com/tinfoilhash/hasheus),
-built with [rust](https://www.rust-lang.org/),
+verify any file with signatures from people you trust, from the command line.
+the cli version of [hasheus](https://github.com/tinfoilhash/hasheus), built with
+[rust](https://www.rust-lang.org/),
 [nostr-sdk](https://github.com/rust-nostr/nostr), and
 [clap](https://github.com/clap-rs/clap).
 

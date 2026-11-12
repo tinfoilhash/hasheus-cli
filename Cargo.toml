@@ -3,7 +3,7 @@ name = "hasheus"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.99"
-description = "verify the integrity of a file with the largest decentralized web of trust"
+description = "verify any file with signatures from people you trust"
 license = "MIT"
 repository = "https://github.com/tinfoilhash/hasheus-cli"
 

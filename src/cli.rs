@@ -6,11 +6,11 @@ use std::path::PathBuf;
 // clap doesn't wrap help without its wrap_help feature, so it's wrapped here.
 const VERIFY_AFTER_HELP: &str = "\
 the user needs a nostr profile, which catches a mistyped key, and verifiers they
-don't follow are untrusted. the exit code is 0 unless an error occurs, whether
-or not the file has been verified.
+don't follow are unknown. the exit code is 0 unless an error occurs, whether or
+not the file has been verified.
 
 with --json, the result is printed once every relay has answered, and its
-status is verified_by_you, trusted, untrusted, or unverified. an error is
+status is verified_by_you, trusted, unknown, or unverified. an error is
 printed to stdout too, as {\"error\":{\"code\":…,\"message\":…}}, with exit code 1.";
 
 const PUBLISH_AFTER_HELP: &str = "\
@@ -34,7 +34,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// verify a file against your web of trust
+    /// verify a file with signatures from people you trust
     #[command(
         override_usage = "hasheus verify [options] <file>",
         after_help = VERIFY_AFTER_HELP

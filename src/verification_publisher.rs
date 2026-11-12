@@ -8,7 +8,7 @@ use crate::name_formatter;
 use crate::profile_fetcher;
 use crate::relay_config::RelayConfig;
 use crate::secret_key_reader;
-use crate::text_sanitizer::sanitize;
+use crate::text_sanitizer::{sanitize, strip_bidi_controls};
 use crate::verification_reporter;
 use nostr_sdk::prelude::*;
 use std::fs;
@@ -21,6 +21,9 @@ const MAX_URL_LENGTH: usize = 1000;
 const MAX_DESCRIPTION_LENGTH: usize = 1000;
 // rfc 6838's limit for a type or subtype.
 const MAX_MIME_TYPE_NAME_LENGTH: usize = 127;
+// like the web page's form.
+const VOUCH_NOTE: &str =
+    "only vouch for what you've checked. getting it from the official site alone isn't enough.";
 pub async fn publish(
     args: PublishArgs,
     relay_config: &RelayConfig,
@@ -95,29 +98,41 @@ async fn fetch_profile_name(public_key: PublicKey, relay_config: &RelayConfig) -
 // published as parsed, which percent-encodes anything hidden (like a bidi
 // override), so the preview shows exactly what's signed.
 fn parse_url(url: &str) -> Result<String, HasheusError> {
-    let url = Url::parse(url.trim()).map_err(|_| HasheusError::InvalidURL)?;
-    let is_web_url = matches!(url.scheme(), "https" | "http");
+    let url = url.trim();
 
-    if !is_web_url || url.as_str().chars().count() > MAX_URL_LENGTH {
+    if url.is_empty() {
+        return Err(HasheusError::URLMissing);
+    }
+
+    let url = Url::parse(url).map_err(|_| HasheusError::InvalidURL)?;
+
+    if !matches!(url.scheme(), "https" | "http") {
         return Err(HasheusError::InvalidURL);
+    }
+
+    if url.as_str().chars().count() > MAX_URL_LENGTH {
+        return Err(HasheusError::URLTooLong);
     }
 
     Ok(url.into())
 }
 
-// like the web page's form, the description defaults to the file's name.
+// like the web page's form, the description defaults to the file's name, which
+// anyone can set, so a right-to-left override can't change how it reads.
 fn parse_description(description: Option<&str>, path: &Path) -> Result<String, HasheusError> {
     let description = match description {
         Some(description) => description.trim().to_string(),
         None => path
             .file_name()
-            .map(|name| name.to_string_lossy().to_string())
+            .map(|name| strip_bidi_controls(&name.to_string_lossy()))
             .unwrap_or_default(),
     };
-    let length = description.chars().count();
+    if description.is_empty() {
+        return Err(HasheusError::DescriptionMissing);
+    }
 
-    if length == 0 || length > MAX_DESCRIPTION_LENGTH {
-        return Err(HasheusError::InvalidDescription);
+    if description.chars().count() > MAX_DESCRIPTION_LENGTH {
+        return Err(HasheusError::DescriptionTooLong);
     }
 
     Ok(description)
@@ -185,8 +200,9 @@ fn confirm(
     let mut stderr = io::stderr().lock();
     let _ = write!(
         stderr,
-        "{}\n\npublish this verification? [y/N] ",
-        render_preview(verification, public_key, name)
+        "{}\n\n{}\n\npublish this verification? [y/N] ",
+        render_preview(verification, public_key, name),
+        VOUCH_NOTE.dim()
     );
     let _ = stderr.flush();
 
@@ -220,8 +236,8 @@ fn render_preview(
         ("file hash", verification.hash),
         ("description", verification.description),
         ("url", verification.url),
-        ("mime type", verification.mime_type),
-        ("verified by", &verifier),
+        ("type", verification.mime_type),
+        ("verifier", &verifier),
     ]
     .map(|(key, value)| format!("{key}\n{}", sanitize(value).bold()))
     .join("\n\n")
@@ -254,6 +270,16 @@ mod tests {
     }
 
     #[test]
+    fn rejects_a_blank_url() {
+        for url in ["", "  "] {
+            assert!(
+                matches!(parse_url(url), Err(HasheusError::URLMissing)),
+                "{url:?}"
+            );
+        }
+    }
+
+    #[test]
     fn rejects_a_url_that_isnt_http() {
         for url in [
             "javascript:alert(1)",
@@ -271,7 +297,7 @@ mod tests {
     fn rejects_a_url_over_1000_characters() {
         let url = format!("https://example.com/{}", "a".repeat(1000));
 
-        assert!(matches!(parse_url(&url), Err(HasheusError::InvalidURL)));
+        assert!(matches!(parse_url(&url), Err(HasheusError::URLTooLong)));
     }
 
     #[test]
@@ -279,6 +305,14 @@ mod tests {
         let description = parse_description(None, Path::new("/downloads/ubuntu.iso")).unwrap();
 
         assert_eq!(description, "ubuntu.iso");
+    }
+
+    #[test]
+    fn removes_bidi_controls_from_the_default_description() {
+        let description =
+            parse_description(None, Path::new("/downloads/file\u{202E}osi.exe")).unwrap();
+
+        assert_eq!(description, "fileosi.exe");
     }
 
     #[test]
@@ -290,14 +324,17 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_blank_or_long_description() {
-        let long = "a".repeat(1001);
+    fn rejects_a_blank_description() {
+        let result = parse_description(Some("  "), Path::new("ubuntu.iso"));
 
-        for description in ["  ", long.as_str()] {
-            let result = parse_description(Some(description), Path::new("ubuntu.iso"));
+        assert!(matches!(result, Err(HasheusError::DescriptionMissing)));
+    }
 
-            assert!(matches!(result, Err(HasheusError::InvalidDescription)));
-        }
+    #[test]
+    fn rejects_a_description_over_1000_characters() {
+        let result = parse_description(Some(&"a".repeat(1001)), Path::new("ubuntu.iso"));
+
+        assert!(matches!(result, Err(HasheusError::DescriptionTooLong)));
     }
 
     #[test]
@@ -379,7 +416,7 @@ mod tests {
         assert_eq!(
             preview,
             format!(
-                "file hash\nffff\n\ndescription\na file\n\nurl\nhttps://example.com/file.iso\n\nmime type\napplication/octet-stream\n\nverified by\n{npub}"
+                "file hash\nffff\n\ndescription\na file\n\nurl\nhttps://example.com/file.iso\n\ntype\napplication/octet-stream\n\nverifier\n{npub}"
             )
         );
     }
@@ -399,7 +436,7 @@ mod tests {
 
         let preview = render_preview(&verification, &keys.public_key(), Some("alice"));
 
-        assert!(preview.ends_with(&format!("verified by\nalice ({npub})")));
+        assert!(preview.ends_with(&format!("verifier\nalice ({npub})")));
     }
 
     #[test]

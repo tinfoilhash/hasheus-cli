@@ -16,8 +16,11 @@ pub enum HasheusError {
     InvalidSecretKey,
     PasswordRequired,
     InvalidPassword,
+    URLMissing,
     InvalidURL,
-    InvalidDescription,
+    URLTooLong,
+    DescriptionMissing,
+    DescriptionTooLong,
     InvalidMIMEType,
     AlreadyVerified,
     PublishRejected { message: String },
@@ -42,8 +45,9 @@ impl HasheusError {
             Self::InvalidSecretKey => "invalid_secret_key",
             Self::PasswordRequired => "password_required",
             Self::InvalidPassword => "invalid_password",
-            Self::InvalidURL => "invalid_url",
-            Self::InvalidDescription => "invalid_description",
+            // split only so their messages can match the web page's form.
+            Self::URLMissing | Self::InvalidURL | Self::URLTooLong => "invalid_url",
+            Self::DescriptionMissing | Self::DescriptionTooLong => "invalid_description",
             Self::InvalidMIMEType => "invalid_mime_type",
             Self::AlreadyVerified => "already_verified",
             Self::PublishRejected { .. } => "publish_rejected",
@@ -90,12 +94,17 @@ impl fmt::Display for HasheusError {
                 "an ncryptsec needs its password, which can only be asked for in a terminal"
             ),
             Self::InvalidPassword => write!(formatter, "the password doesn't unlock the ncryptsec"),
+            // like the web page's form. it can't go over the length limits, so
+            // only those messages are the cli's own.
+            Self::URLMissing => write!(formatter, "add a url for the file"),
             Self::InvalidURL => write!(
                 formatter,
-                "the url must be an http or https url of at most 1,000 characters"
+                "enter a url that starts with http:// or https://"
             ),
-            Self::InvalidDescription => {
-                write!(formatter, "the description must be 1 to 1,000 characters")
+            Self::URLTooLong => write!(formatter, "enter a url of up to 1,000 characters"),
+            Self::DescriptionMissing => write!(formatter, "describe the file"),
+            Self::DescriptionTooLong => {
+                write!(formatter, "describe the file in up to 1,000 characters")
             }
             Self::InvalidMIMEType => write!(
                 formatter,

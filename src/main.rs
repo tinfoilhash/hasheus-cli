@@ -80,11 +80,8 @@ async fn run(cli: Cli, output_format: OutputFormat) -> Result<(), HasheusError> 
 // so a failed write is ignored rather than panicking.
 fn print_error(error: &HasheusError, output_format: OutputFormat) {
     match output_format {
-        OutputFormat::Text => {
-            eprintln!("{}", " an error occurred! ".bold().on_red());
-            eprintln!();
-            eprintln!("{error}");
-        }
+        // like the web page, the message stands on its own, without a heading.
+        OutputFormat::Text => eprintln!("{}", format!(" {error} ").bold().on_red()),
         OutputFormat::Json => {
             let json = json_serializer::serialize_error(error);
             let _ = writeln!(io::stdout().lock(), "{json}");
