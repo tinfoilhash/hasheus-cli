@@ -6,6 +6,7 @@ mod file_event_publisher;
 mod file_hash_reporter;
 mod file_hasher;
 mod file_verifier;
+mod hash_formatter;
 mod hasheus_error;
 mod helmet_renderer;
 mod json_serializer;

@@ -2,6 +2,7 @@ use crate::cli::{OutputFormat, PublishArgs};
 use crate::current_user_cache;
 use crate::file_event_publisher::{self, FileEventPublisher, FileVerification};
 use crate::file_hash_reporter;
+use crate::hash_formatter;
 use crate::hasheus_error::HasheusError;
 use crate::mime_type_guesser;
 use crate::name_formatter;
@@ -232,14 +233,16 @@ fn render_preview(
         None => npub,
     };
 
+    let render_text = |text: &str| sanitize(text).bold().to_string();
+
     [
-        ("file hash", verification.hash),
-        ("description", verification.description),
-        ("url", verification.url),
-        ("type", verification.mime_type),
-        ("verifier", &verifier),
+        ("file hash", hash_formatter::format(verification.hash)),
+        ("description", render_text(verification.description)),
+        ("url", render_text(verification.url)),
+        ("type", render_text(verification.mime_type)),
+        ("verifier", render_text(&verifier)),
     ]
-    .map(|(key, value)| format!("{key}\n{}", sanitize(value).bold()))
+    .map(|(key, value)| format!("{key}\n{value}"))
     .join("\n\n")
 }
 

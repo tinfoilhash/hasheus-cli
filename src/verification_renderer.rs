@@ -1,6 +1,7 @@
 use crate::current_user::CurrentUser;
 use crate::file_event;
 use crate::file_hasher::FileHash;
+use crate::hash_formatter;
 use crate::name_formatter;
 use crate::spinner;
 use crate::text_sanitizer::sanitize;
@@ -30,18 +31,21 @@ pub fn render(file_hash: &FileHash, verifications: &Verifications, spinner_frame
 
     let sections = [
         render_status(&sorted, current_user, *is_pending),
-        vec!["file hash".to_string(), file_hash.hash.bold().to_string()],
+        vec![
+            "file hash".to_string(),
+            hash_formatter::format(&file_hash.hash),
+        ],
         render_description(&sorted.source, &empty_value),
         render_url(&sorted.source, &empty_value),
         render_source(&sorted.source, verifications, &empty_value),
         render_verifiers(
-            "trusted verifiers",
+            "trusted",
             &sorted.trusted_events,
             verifications,
             &empty_value,
         ),
         render_verifiers(
-            "unknown verifiers",
+            "unknown",
             &sorted.unknown_events,
             verifications,
             &empty_value,
@@ -75,10 +79,9 @@ fn render_status(
     current_user: Option<&CurrentUser>,
     is_pending: bool,
 ) -> Vec<String> {
-    // like the web page, a status that's neither good nor bad news is uncolored.
     let status = match sorted.verdict {
-        Verdict::VerifiedByYou => " you've verified this file ".bold().on_green().to_string(),
-        _ if is_pending => "looking up verifications…".bold().to_string(),
+        Verdict::VerifiedByYou => on_green(" you've verified this file "),
+        _ if is_pending => on_grey(" looking up verifications… "),
         Verdict::Trusted => {
             let count = sorted.trusted_events.len();
             let people = if count == 1 {
@@ -87,10 +90,7 @@ fn render_status(
                 format!("{count} people")
             };
 
-            format!(" {people} you follow verified this file ")
-                .bold()
-                .on_green()
-                .to_string()
+            on_green(&format!(" {people} you follow verified this file "))
         }
         Verdict::Unknown => {
             let reason = if current_user.is_some() {
@@ -103,7 +103,7 @@ fn render_status(
                 " {reason}; its description, url, and source come from an unknown verifier "
             ))
         }
-        Verdict::Unverified => "no one has verified this file yet".bold().to_string(),
+        Verdict::Unverified => on_grey(" no one has verified this file yet "),
     };
 
     vec![status]
@@ -215,19 +215,28 @@ fn render_unknown_tag() -> String {
 }
 
 fn render_trusted_tag() -> String {
-    " ✓ trusted ".on_green().to_string()
+    on_green(" ✓ trusted ")
 }
 
 // the source is one of the agreeing verifiers, so only the others are counted.
 fn render_agreement_tag(agreement_count: usize) -> Option<String> {
     let other_count = agreement_count.checked_sub(1).filter(|count| *count > 0)?;
 
-    Some(format!(" ✓ +{other_count} trusted ").on_green().to_string())
+    Some(on_green(&format!(" ✓ +{other_count} trusted ")))
 }
 
-// the terminal's own text color can be too light to read on yellow.
+// the terminal's own text color can be too light to read on yellow or green.
+// it isn't bold, since many terminals show bold black as grey.
 fn on_yellow(text: &str) -> String {
     text.black().on_yellow().to_string()
+}
+
+fn on_green(text: &str) -> String {
+    text.black().on_green().to_string()
+}
+
+fn on_grey(text: &str) -> String {
+    text.white().on_bright_black().to_string()
 }
 
 fn render_verifier_list(
@@ -313,7 +322,7 @@ mod tests {
     fn render_shows_pending_values_while_pending() {
         let rendered = render(&build_file_hash(), &build_verifications(true), 2);
 
-        assert!(rendered.starts_with("looking up verifications…\n\nfile hash"));
+        assert!(rendered.starts_with(" looking up verifications… \n\nfile hash"));
         assert!(rendered.contains("source\n⠹"));
         assert!(!rendered.contains("no one has verified this file yet"));
     }
@@ -364,7 +373,7 @@ mod tests {
     fn render_shows_empty_values_once_complete() {
         let rendered = render(&build_file_hash(), &build_verifications(false), 2);
 
-        assert!(rendered.starts_with("no one has verified this file yet\n\nfile hash"));
+        assert!(rendered.starts_with(" no one has verified this file yet \n\nfile hash"));
         assert!(rendered.contains("source\n—"));
     }
 
@@ -479,10 +488,8 @@ mod tests {
     fn render_lists_trusted_verifiers_and_who_is_connected() {
         let rendered = render(&build_file_hash(), &build_trusted_verifications(), 0);
 
-        assert!(rendered.contains("trusted verifiers\nalice "));
-        assert!(rendered.ends_with(&format!(
-            "unknown verifiers\n—\n\n{PUBLISH_HINT}\nconnected: viewer"
-        )));
+        assert!(rendered.contains("trusted\nalice "));
+        assert!(rendered.ends_with(&format!("unknown\n—\n\n{PUBLISH_HINT}\nconnected: viewer")));
     }
 
     #[test]
@@ -515,7 +522,7 @@ mod tests {
     fn render_hints_at_passing_a_user_without_one() {
         let rendered = render(&build_file_hash(), &build_verifications(false), 0);
 
-        assert!(rendered.contains("trusted verifiers\n—"));
+        assert!(rendered.contains("trusted\n—"));
         assert!(rendered.ends_with(&format!("{PUBLISH_HINT}\n{USER_HINT}")));
     }
 
@@ -529,7 +536,7 @@ mod tests {
         let rendered = render(&file_hash, &build_verifications(false), 0);
 
         assert!(!rendered.contains(PUBLISH_HINT));
-        assert!(rendered.ends_with(&format!("unknown verifiers\n—\n\n{USER_HINT}")));
+        assert!(rendered.ends_with(&format!("unknown\n—\n\n{USER_HINT}")));
     }
 
     #[test]
