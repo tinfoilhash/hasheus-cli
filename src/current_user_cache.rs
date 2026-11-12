@@ -14,6 +14,10 @@ pub struct CachedUser {
     requested_at: u64,
     pub profile_event: Option<Event>,
     pub follow_list_event: Option<Event>,
+    // whether it was requested within the hour. a stale one is still read, so
+    // its follow list can keep an older one a relay returns from replacing it.
+    #[serde(skip)]
+    pub is_fresh: bool,
 }
 
 // the cache only saves fetching, so one that can't be read or written is
@@ -30,8 +34,9 @@ pub fn write(current_user: &CurrentUser) {
 
 fn read_from(directory: &Path, public_key: &PublicKey, now: Timestamp) -> Option<CachedUser> {
     let json = fs::read_to_string(cache_path(directory, public_key)).ok()?;
-    let cached_user: CachedUser = serde_json::from_str(&json).ok()?;
-    let is_fresh = now.as_secs().saturating_sub(cached_user.requested_at) < REFRESH_AFTER_SECONDS;
+    let mut cached_user: CachedUser = serde_json::from_str(&json).ok()?;
+    cached_user.is_fresh =
+        now.as_secs().saturating_sub(cached_user.requested_at) < REFRESH_AFTER_SECONDS;
     let is_valid = is_valid_event(
         cached_user.profile_event.as_ref(),
         public_key,
@@ -45,7 +50,7 @@ fn read_from(directory: &Path, public_key: &PublicKey, now: Timestamp) -> Option
     // a profile is required to connect, so a cache without one is refetched.
     let has_profile = cached_user.profile_event.is_some();
 
-    (is_fresh && is_valid && has_profile).then_some(cached_user)
+    (is_valid && has_profile).then_some(cached_user)
 }
 
 // the file could have been edited, so its events are checked like a relay's.
@@ -60,6 +65,7 @@ fn write_to(directory: &Path, current_user: &CurrentUser, now: Timestamp) {
         requested_at: now.as_secs(),
         profile_event: current_user.profile_event().cloned(),
         follow_list_event: current_user.follow_list_event().cloned(),
+        is_fresh: true,
     };
     let Ok(json) = serde_json::to_string(&cached_user) else {
         return;
@@ -148,6 +154,7 @@ mod tests {
         write_to(&cache.directory, &current_user, Timestamp::from_secs(NOW));
         let cached_user = cache.read(NOW + 60).unwrap();
 
+        assert!(cached_user.is_fresh);
         assert_eq!(
             cached_user.profile_event.as_ref(),
             current_user.profile_event()
@@ -159,7 +166,7 @@ mod tests {
     }
 
     #[test]
-    fn ignores_a_cache_an_hour_old() {
+    fn reads_a_cache_an_hour_old_as_stale() {
         let cache = TestCache::new();
 
         write_to(
@@ -168,7 +175,7 @@ mod tests {
             Timestamp::from_secs(NOW),
         );
 
-        assert!(cache.read(NOW + REFRESH_AFTER_SECONDS).is_none());
+        assert!(!cache.read(NOW + REFRESH_AFTER_SECONDS).unwrap().is_fresh);
     }
 
     #[test]
@@ -208,6 +215,7 @@ mod tests {
             requested_at: NOW,
             profile_event: Some(build_profile(&cache.keys, 1, "alice")),
             follow_list_event: Some(build_follow_list(&Keys::generate(), 1, &[])),
+            is_fresh: true,
         });
 
         assert!(cache.read(NOW).is_none());

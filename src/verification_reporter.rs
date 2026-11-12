@@ -112,11 +112,22 @@ fn restore_cached_user(
     let Some(CachedUser {
         profile_event,
         follow_list_event,
+        is_fresh,
         ..
     }) = current_user_cache::read(&public_key)
     else {
         return Some(public_key);
     };
+
+    if !is_fresh {
+        if let (Some(current_user), Some(follow_list_event)) =
+            (verifications.current_user.as_mut(), follow_list_event)
+        {
+            current_user.set_stored_follow_list(follow_list_event);
+        }
+
+        return Some(public_key);
+    }
 
     let updates = profile_event
         .map(Update::Profile)
