@@ -86,8 +86,9 @@ pub async fn publish(
 // a fresh cached profile saves a lookup. a fetched one isn't cached, since the
 // cache also holds the follow list, which isn't fetched here.
 async fn fetch_profile_name(public_key: PublicKey, relay_config: &RelayConfig) -> Option<String> {
-    let cached_profile =
-        current_user_cache::read(&public_key).and_then(|cached| cached.profile_event);
+    let cached_profile = current_user_cache::read(&public_key)
+        .filter(|cached| cached.is_fresh)
+        .and_then(|cached| cached.profile_event);
     let profile = match cached_profile {
         Some(profile) => profile,
         None => profile_fetcher::fetch(public_key, &relay_config.user_relay_urls).await?,
