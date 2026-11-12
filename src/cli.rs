@@ -75,7 +75,7 @@ pub struct PublishArgs {
     pub description: Option<String>,
 
     /// the file's mime type, like application/zip [default: a guess from its extension]
-    #[arg(long, value_name = "type")]
+    #[arg(long = "type", value_name = "type")]
     pub mime_type: Option<String>,
 
     /// the secret key to sign with (nsec or ncryptsec) [default: HASHEUS_SECRET_KEY, then a prompt]
@@ -194,7 +194,7 @@ mod tests {
             "https://example.com/file.iso",
             "--description",
             "a file",
-            "--mime-type",
+            "--type",
             "application/x-iso9660-image",
             "--yes",
         ])
