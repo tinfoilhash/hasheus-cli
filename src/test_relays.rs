@@ -2,8 +2,9 @@ use crate::relay_config::RelayConfig;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
 
-// relays for tests: one running in the test process, seeded with events, and
-// one that can't be reached.
+// relays for tests: one running in the test process, seeded with events, one
+// that answers with events that weren't asked for, and one that can't be
+// reached.
 
 // nothing listens on port 1, so connecting fails right away.
 pub const DEAD_RELAY_URL: &str = "ws://127.0.0.1:1";
@@ -23,6 +24,19 @@ pub async fn run_relay(events: &[Event]) -> (MockRelay, String) {
     for event in events {
         client.send_event(event).await.unwrap();
     }
+
+    (relay, url.to_string())
+}
+
+// a relay that answers every request with events that don't match it.
+pub async fn run_mismatching_relay() -> (MockRelay, String) {
+    let relay = MockRelay::run_with_opts(LocalRelayTestOptions {
+        unresponsive_connection: None,
+        send_random_events: true,
+    })
+    .await
+    .unwrap();
+    let url = relay.url().await;
 
     (relay, url.to_string())
 }

@@ -24,7 +24,7 @@ pub struct FileEventPublisher {
 
 impl FileEventPublisher {
     pub async fn connect(relay_config: &RelayConfig) -> Result<Self, HasheusError> {
-        let client = Client::default();
+        let client = relay_connector::build_client();
         let relay_urls = relay_connector::connect_all(&client, &relay_config.file_relay_urls).await;
 
         if relay_urls.is_empty() {
